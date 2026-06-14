@@ -1,0 +1,566 @@
+---
+title: "thesis"
+author: "Tala Mansour"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+rm(list = ls())
+library(tidyverse)
+library(Matching)
+```
+
+##EDA & Data cleaning
+
+```{r}
+#Data
+data(lalonde)
+Y <- lalonde$re78
+D <- lalonde$treat
+n <- length(Y)
+p_hat <- mean(D)
+
+cat("n:", n, "\n")
+cat("n treated:", sum(D==1), "\n")
+cat("n control:", sum(D==0), "\n")
+cat("p_hat:", round(p_hat, 3), "\n")
+cat("Mean Y treated:", round(mean(Y[D==1]), 3), "\n")
+cat("Mean Y control:", round(mean(Y[D==0]), 3), "\n")
+cat("Raw mean diff: ", round(mean(Y[D==1]) - mean(Y[D==0]), 3), "\n")
+
+# --- Discretize covariates ---
+lalonde$age_cat <- cut(lalonde$age,
+                       breaks = c(-Inf, 24, 34, Inf),
+                       labels = c("young", "middle", "older"))
+
+lalonde$educ_cat <- cut(lalonde$educ,
+                        breaks = c(-Inf, 8, 12, Inf),
+                        labels = c("less_than_hs", "hs", "above_hs"))
+
+lalonde$re74_cat <- cut(lalonde$re74,
+                        breaks = c(-Inf, 0, median(lalonde$re74[lalonde$re74 > 0]), Inf),
+                        labels = c("zero", "low", "high"))
+
+lalonde$re75_cat <- cut(lalonde$re75,
+                        breaks = c(-Inf, 0, median(lalonde$re75[lalonde$re75 > 0]), Inf),
+                        labels = c("zero", "low", "high"))
+
+X <- model.matrix(~ age_cat + educ_cat + re74_cat + re75_cat +
+                    black + hisp + married + nodegr - 1,
+                  data = lalonde)
+
+cat("\nCovariate matrix dimensions:", dim(X), "\n")
+print(colnames(X))
+```
+## FWL Resuidualization
+```{r}
+# --- FWL Residualization ---
+MX        <- diag(n) - X %*% solve(t(X) %*% X) %*% t(X)
+W         <- MX %*% D
+R         <- MX %*% Y
+beta_long <- sum(W * R) / sum(W^2)
+r_hat     <- R - beta_long * W
+
+cat("beta_long:", round(beta_long, 3), "\n")
+cat("mean W (should be ~0):", round(mean(W), 6), "\n")
+cat("mean R (should be ~0):", round(mean(R), 6), "\n\n")
+
+E_W2   <- mean(W^2)
+E_r2   <- mean(r_hat^2)
+E_W2r2 <- mean(W^2 * r_hat^2)
+tau2   <- E_W2r2 / (E_W2 * E_r2)
+
+sigma2_1 <- mean(r_hat[D==1]^2)
+sigma2_0 <- mean(r_hat[D==0]^2)
+
+cat("E[W^2]:   ", round(E_W2, 6), "\n")
+cat("E[r^2]:   ", round(E_r2, 3), "\n")
+cat("E[W^2r^2]:", round(E_W2r2, 3), "\n")
+cat("tau^2:    ", round(tau2, 4), "\n\n")
+cat("sigma^2_1:", round(sigma2_1, 3), "\n")
+cat("sigma^2_0:", round(sigma2_0, 3), "\n\n")
+```
+## Permutation test
+```{r}
+# --- Permutation Test ---
+T_obs     <- sum(W * R) / sqrt(n)
+Omega_hat <- mean(W^2 * r_hat^2)
+S_obs     <- T_obs / sqrt(Omega_hat)
+
+set.seed(123)
+B       <- 1000
+T_perm  <- numeric(B)
+S_perm  <- numeric(B)
+
+for(b in 1:B){
+  perm       <- sample(1:n)
+  R_perm     <- R[perm]
+  T_perm[b]  <- sum(W * R_perm) / sqrt(n)
+  beta_perm  <- sum(W * R_perm) / sum(W^2)
+  r_perm     <- R_perm - beta_perm * W
+  Omega_perm <- mean(W^2 * r_perm^2)
+  S_perm[b]  <- T_perm[b] / sqrt(Omega_perm)
+}
+
+p_T <- mean(T_perm >= T_obs)
+p_S <- mean(S_perm >= S_obs)
+
+cat("T_obs:", round(T_obs, 4), "\n")
+cat("S_obs:", round(S_obs, 4), "\n\n")
+cat("Unstudentized p-value:", round(p_T, 3), "\n")
+cat("Studentized p-value:  ", round(p_S, 3), "\n")
+```
+```{r}
+alpha <- 0.05
+z_a   <- qnorm(0.95)
+z_b   <- qnorm(0.80)
+
+pow_studentized   <- 1 - pnorm(z_a - beta_long * p_hat*(1-p_hat) /
+                                  sqrt(E_W2r2 / n))
+pow_standard      <- 1 - pnorm((z_a * sqrt(E_W2 * E_r2) -
+                                  beta_long * p_hat*(1-p_hat)*sqrt(n)) /
+                                 sqrt(E_W2r2))
+
+mde_studentized   <- (z_a + z_b) * sqrt(E_W2r2) / (p_hat * (1-p_hat) * sqrt(n))
+mde_standard      <- (z_a * sqrt(E_W2 * E_r2) + z_b * sqrt(E_W2r2)) /
+                       (p_hat * (1-p_hat) * sqrt(n))
+
+n_studentized     <- (z_a + z_b)^2 * E_W2r2 / (beta_long * p_hat * (1-p_hat))^2
+n_standard        <- ((z_a * sqrt(E_W2 * E_r2) + z_b * sqrt(E_W2r2)) /
+                        (beta_long * p_hat * (1-p_hat)))^2
+
+lalonde_pow_diff  <- pow_standard - pow_studentized
+
+cat("Power studentized:   ", round(pow_studentized, 4), "\n")
+cat("Power standard:      ", round(pow_standard, 4), "\n")
+cat("MDE studentized:     ", round(mde_studentized, 0), "\n")
+cat("MDE standard:        ", round(mde_standard, 0), "\n")
+cat("n* studentized:      ", round(n_studentized, 0), "\n")
+cat("n* standard:         ", round(n_standard, 0), "\n")
+```
+
+## LaLonde distribution plot
+```{r}
+# --- LaLonde Distribution Plot ---
+set.seed(123)
+B <- 2000
+T_perm_lalonde <- numeric(B)
+
+for(b in 1:B){
+  perm              <- sample(1:n)
+  R_perm            <- R[perm]
+  T_perm_lalonde[b] <- sum(W * R_perm) / sqrt(n)
+}
+
+sd_rand_l  <- sd(T_perm_lalonde)
+sd_true_l  <- sqrt(E_W2r2)
+cv_perm_l  <- quantile(T_perm_lalonde, 0.95)
+rej_prob_l <- 1 - pnorm(cv_perm_l, mean = 0, sd = sd_true_l)
+
+cat("LaLonde tau^2:", round(tau2, 4), "\n")
+cat("SD permutation:", round(sd_rand_l, 3), "\n")
+cat("SD true:       ", round(sd_true_l, 3), "\n")
+cat("CV permutation:", round(cv_perm_l, 3), "\n")
+cat("Actual Type I error:", round(rej_prob_l, 3), "\n")
+
+x_seq_l <- seq(-12000, 12000, length.out = 2000)
+d_perm_l <- dnorm(x_seq_l, mean = 0, sd = sd_rand_l)
+d_true_l <- dnorm(x_seq_l, mean = 0, sd = sd_true_l)
+
+plot_df_l <- data.frame(
+  x    = rep(x_seq_l, 2),
+  y    = c(d_perm_l, d_true_l),
+  type = rep(c("Randomization distribution", "True sampling distribution"),
+             each = length(x_seq_l))
+)
+
+shade_df_l <- data.frame(
+  x = x_seq_l[x_seq_l >= cv_perm_l],
+  y = dnorm(x_seq_l[x_seq_l >= cv_perm_l], mean = 0, sd = sd_true_l)
+)
+
+lalondeTau <- ggplot() +
+  geom_area(data = shade_df_l, aes(x = x, y = y),
+            fill = "#3498DB", alpha = 0.4) +
+  geom_line(data = plot_df_l, aes(x = x, y = y, color = type),
+            linewidth = 1.2) +
+  geom_vline(xintercept = cv_perm_l,
+             color = "orange", linewidth = 1, linetype = "dashed") +
+  annotate("text", x = cv_perm_l + 300, y = max(d_perm_l) * 0.85,
+           label = paste0("CV = ", round(cv_perm_l, 0)),
+           color = "orange", hjust = 0, size = 3.5) +
+  annotate("text", x = cv_perm_l + 300, y = max(d_perm_l) * 0.6,
+           label = paste0("Type I error = ", round(rej_prob_l, 3)),
+           color = "#3498DB", hjust = 0, size = 3.5) +
+  scale_color_manual(values = c("Randomization distribution" = "orange",
+                                 "True sampling distribution" = "#3498DB"),
+                     name = NULL) +
+  labs(title = expression("Randomization vs Sampling Distribution, " ~
+                          tau^2 ~ "= 1.048"),
+       x = expression(T[n]), y = "Density") +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "bottom",
+        panel.grid.minor = element_blank())
+#ggsave("fig_ch4_lalonde", plot = lalondeTau, width = 8, height = 5)
+lalondeTau
+```
+## scenarios
+```{r}
+# --- Simulated Scenarios: tau^2 > 1 (p=0.1, sigma1/sigma0=2) ---
+set.seed(42)
+n_sim  <- 2000
+p_sim  <- 0.1
+
+sigma0_sim <- E_r2 / (p_sim * 2 + (1 - p_sim))
+sigma1_sim <- 2 * sigma0_sim
+
+D_sim <- rbinom(n_sim, 1, p_sim)
+r_sim <- ifelse(D_sim == 1,
+                rnorm(n_sim, 0, sqrt(sigma1_sim)),
+                rnorm(n_sim, 0, sqrt(sigma0_sim)))
+
+Y_sim        <- beta_long * D_sim + r_sim
+W_sim        <- D_sim - p_sim
+R_sim        <- Y_sim - mean(Y_sim)
+beta_sim_est <- sum(W_sim * R_sim) / sum(W_sim^2)
+r_hat_sim    <- R_sim - beta_sim_est * W_sim
+
+E_W2_sim   <- mean(W_sim^2)
+E_r2_sim   <- mean(r_hat_sim^2)
+E_W2r2_sim <- mean(W_sim^2 * r_hat_sim^2)
+tau2_sim   <- E_W2r2_sim / (E_W2_sim * E_r2_sim)
+
+set.seed(123)
+B <- 2000
+T_perm_sim <- numeric(B)
+
+for(b in 1:B){
+  perm          <- sample(1:n_sim)
+  R_perm        <- R_sim[perm]
+  T_perm_sim[b] <- sum(W_sim * R_perm) / sqrt(n_sim)
+}
+
+cv_perm   <- quantile(T_perm_sim, 0.95)
+sd_true   <- sqrt(E_W2r2_sim)
+sd_rand   <- sd(T_perm_sim)
+rej_prob  <- 1 - pnorm(cv_perm, mean = 0, sd = sd_true)
+
+cat("tau^2:", round(tau2_sim, 4), "\n")
+cat("CV from permutation:", round(cv_perm, 3), "\n")
+cat("SD true (sampling): ", round(sd_true, 3), "\n")
+cat("SD rand (permutation):", round(sd_rand, 3), "\n")
+cat("Actual rejection prob:", round(rej_prob, 3), "\n")
+
+
+x_seq_s1  <- seq(-10000, 12000, length.out = 2000)
+d_perm_s1 <- dnorm(x_seq_s1, mean = 0, sd = sd_rand)
+d_true_s1 <- dnorm(x_seq_s1, mean = 0, sd = sd_true)
+
+plot_df_s1 <- data.frame(
+  x    = rep(x_seq_s1, 2),
+  y    = c(d_perm_s1, d_true_s1),
+  type = rep(c("Randomization distribution", "True sampling distribution"),
+             each = length(x_seq_s1))
+)
+
+shade_df_s1 <- data.frame(
+  x = x_seq_s1[x_seq_s1 >= cv_perm],
+  y = dnorm(x_seq_s1[x_seq_s1 >= cv_perm], mean = 0, sd = sd_true)
+)
+
+p_high <- ggplot() +
+  geom_area(data = shade_df_s1, aes(x = x, y = y),
+            fill = "#3498DB", alpha = 0.4) +
+  geom_line(data = plot_df_s1, aes(x = x, y = y, color = type),
+            linewidth = 1.2) +
+  geom_vline(xintercept = cv_perm,
+             color = "orange", linewidth = 1, linetype = "dashed") +
+  annotate("text", x = cv_perm + 200, y = max(d_perm_s1) * 0.95,
+           label = paste0("CV = ", round(cv_perm, 0)),
+           color = "orange", hjust = 0, size = 3.5) +
+  annotate("text", x = cv_perm + 200, y = max(d_perm_s1) * 0.75,
+           label = paste0("Type I error = ", round(rej_prob, 3)),
+           color = "#3498DB", hjust = 0, size = 3.5) +
+  scale_color_manual(values = c("Randomization distribution" = "orange",
+                                 "True sampling distribution" = "#3498DB"),
+                     name = NULL) +
+  labs(title = expression("Randomization vs Sampling Distribution," ~
+                          tau^2 ~ "= 1.84"),
+       x = expression(T[n]), y = "Density") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "bottom",
+        panel.grid.minor = element_blank())
+p_high
+##ggsave("fig_ch3_tau_high.pdf", plot = p_high, width = 8, height = 5)
+```
+## Scenarios
+```{r}
+# --- Simulated Scenarios: tau^2 < 1 (p=0.1, sigma1/sigma0=0.5) ---
+set.seed(42)
+n_sim2  <- 2000
+p_sim2  <- 0.1
+
+sigma0_sim2 <- E_r2 / (p_sim2 * 0.5 + (1 - p_sim2))
+sigma1_sim2 <- 0.5 * sigma0_sim2
+
+D_sim2 <- rbinom(n_sim2, 1, p_sim2)
+r_sim2 <- ifelse(D_sim2 == 1,
+                 rnorm(n_sim2, 0, sqrt(sigma1_sim2)),
+                 rnorm(n_sim2, 0, sqrt(sigma0_sim2)))
+
+Y_sim2     <- beta_long * D_sim2 + r_sim2
+W_sim2     <- D_sim2 - p_sim2
+R_sim2     <- Y_sim2 - mean(Y_sim2)
+beta_sim2  <- sum(W_sim2 * R_sim2) / sum(W_sim2^2)
+r_hat_sim2 <- R_sim2 - beta_sim2 * W_sim2
+
+E_W2_sim2   <- mean(W_sim2^2)
+E_r2_sim2   <- mean(r_hat_sim2^2)
+E_W2r2_sim2 <- mean(W_sim2^2 * r_hat_sim2^2)
+tau2_sim2   <- E_W2r2_sim2 / (E_W2_sim2 * E_r2_sim2)
+
+set.seed(123)
+T_perm_sim2 <- numeric(B)
+
+for(b in 1:B){
+  perm           <- sample(1:n_sim2)
+  R_perm         <- R_sim2[perm]
+  T_perm_sim2[b] <- sum(W_sim2 * R_perm) / sqrt(n_sim2)
+}
+
+sd_rand2  <- sd(T_perm_sim2)
+sd_true2  <- sqrt(E_W2r2_sim2)
+cv_perm2  <- quantile(T_perm_sim2, 0.95)
+rej_prob2 <- 1 - pnorm(cv_perm2, mean = 0, sd = sd_true2)
+
+cat("tau^2:", round(tau2_sim2, 4), "\n")
+cat("SD permutation:", round(sd_rand2, 3), "\n")
+cat("SD true:       ", round(sd_true2, 3), "\n")
+cat("CV permutation:", round(cv_perm2, 3), "\n")
+cat("Actual Type I error:", round(rej_prob2, 3), "\n")
+
+x_seq_s2  <- seq(-8000, 10000, length.out = 2000)
+d_perm_s2 <- dnorm(x_seq_s2, mean = 0, sd = sd_rand2)
+d_true_s2 <- dnorm(x_seq_s2, mean = 0, sd = sd_true2)
+
+plot_df_s2 <- data.frame(
+  x    = rep(x_seq_s2, 2),
+  y    = c(d_perm_s2, d_true_s2),
+  type = rep(c("Randomization distribution", "True sampling distribution"),
+             each = length(x_seq_s2))
+)
+
+shade_df_s2 <- data.frame(
+  x = x_seq_s2[x_seq_s2 >= cv_perm2],
+  y = dnorm(x_seq_s2[x_seq_s2 >= cv_perm2], mean = 0, sd = sd_true2)
+)
+
+p_low <- ggplot() +
+  geom_area(data = shade_df_s2, aes(x = x, y = y),
+            fill = "#3498DB", alpha = 0.4) +
+  geom_line(data = plot_df_s2, aes(x = x, y = y, color = type),
+            linewidth = 1.2) +
+  geom_vline(xintercept = cv_perm2,
+             color = "orange", linewidth = 1, linetype = "dashed") +
+  annotate("text", x = cv_perm2 + 200, y = max(d_perm_s2) * 0.95,
+           label = paste0("CV = ", round(cv_perm2, 0)),
+           color = "orange", hjust = 0, size = 3.5) +
+  annotate("text", x = cv_perm2 + 200, y = max(d_perm_s2) * 0.75,
+           label = paste0("Type I error = ", round(rej_prob2, 3)),
+           color = "#3498DB", hjust = 0, size = 3.5) +
+  scale_color_manual(values = c("Randomization distribution" = "orange",
+                                 "True sampling distribution" = "#3498DB"),
+                     name = NULL) +
+  labs(title = expression("Randomization vs Sampling Distribution," ~
+                          tau^2 ~ "= 0.62"),
+       x = expression(T[n]), y = "Density") +
+  theme_minimal(base_size = 12) +
+  theme(plot.title = element_text(hjust = 0.5),
+        legend.position = "bottom",
+        panel.grid.minor = element_blank())
+p_low
+##ggsave("fig_ch3_tau_low.pdf", plot = p_low, width = 8, height = 5)
+```
+## Power distortion curve
+```{r}
+# --- Power Distortion Curve ---
+tau2_seq <- seq(0.3, 2.0, by = 0.01)
+
+pow_studentized_tau <- numeric(length(tau2_seq))
+pow_standard_tau    <- numeric(length(tau2_seq))
+
+for(i in seq_along(tau2_seq)){
+  tau2_i   <- tau2_seq[i]
+  E_W2r2_i <- tau2_i * E_W2 * E_r2
+  
+  pow_studentized_tau[i] <- 1 - pnorm(z_a - beta_long * p_hat*(1-p_hat) /
+                                         sqrt(E_W2r2_i / n))
+  pow_standard_tau[i]    <- 1 - pnorm((z_a * sqrt(E_W2 * E_r2) -
+                                         beta_long * p_hat*(1-p_hat)*sqrt(n)) /
+                                        sqrt(E_W2r2_i))
+}
+
+power_diff_tau <- pow_standard_tau - pow_studentized_tau
+
+plot_df <- data.frame(
+  tau2     = tau2_seq,
+  pow_diff = power_diff_tau
+)
+
+plot_df <- plot_df %>%
+  mutate(region = case_when(
+    tau2 < 1 ~ "Understates",
+    tau2 > 1 ~ "Overstates",
+    TRUE     ~ "None"
+  ))
+
+tau_sens1 <- ggplot(plot_df, aes(x = tau2, y = pow_diff)) +
+  geom_ribbon(data = subset(plot_df, tau2 <= 1),
+              aes(ymin = pow_diff, ymax = 0, fill = "Understates"),
+              alpha = 0.3) +
+  geom_ribbon(data = subset(plot_df, tau2 >= 1),
+              aes(ymin = 0, ymax = pow_diff, fill = "Overstates"),
+              alpha = 0.3) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "gray50") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray50") +
+  geom_line(linewidth = 0.9, color = "black") +
+  geom_point(data = data.frame(tau2 = tau2, pow_diff = lalonde_pow_diff),
+             aes(x = tau2, y = pow_diff, shape = "LaLonde experimental"),
+             color = "blue", size = 3) +
+  scale_fill_manual(
+    name   = NULL,
+    values = c("Understates" = "darkgreen", "Overstates" = "red"),
+    labels = c(expression(paste("Overstates power (", tau^2, " > 1)")),
+               expression(paste("Understates power (", tau^2, " < 1)")))
+  ) +
+  scale_shape_manual(name = NULL, values = c("LaLonde experimental" = 19)) +
+  guides(fill  = guide_legend(order = 1),
+         shape = guide_legend(order = 2, override.aes = list(color = "blue"))) +
+  scale_y_continuous(limits = c(-0.25, 0.25),
+                     labels = scales::percent_format(accuracy = 1)) +
+  scale_x_continuous(limits = c(0.3, 2.05)) +
+  labs(title = expression("Power Distortion as a Function of " ~ tau^2),
+       x     = expression(tau^2),
+       y     = "Power difference (unstudentized - studentized)") +
+  theme_minimal(base_size = 13) +
+  theme(plot.title = element_text(hjust = 0.5),
+        panel.grid.minor = element_blank(),
+        legend.position = "right")
+
+
+tau_sens1
+##ggsave("fig_ch4_tau_sens.pdf", plot = tau_sens1, width = 8, height = 5)
+
+
+```
+## Scenario table 
+```{r}
+# --- Sensitivity analysis numbers ---
+idx_06  <- which.min(abs(tau2_seq - 0.6))
+idx_05  <- which.min(abs(tau2_seq - 0.5))
+idx_04  <- which.min(abs(tau2_seq - 0.4))
+idx_03  <- which.min(abs(tau2_seq - 0.3))
+idx_min <- which.min(power_diff_tau)
+
+cat("tau^2 = 0.6:  power diff =", round(power_diff_tau[idx_06], 4),
+    "| correct power =", round(pow_studentized_tau[idx_06], 3),
+    "| incorrect power =", round(pow_standard_tau[idx_06], 3), "\n")
+cat("tau^2 = 0.5:  power diff =", round(power_diff_tau[idx_05], 4),
+    "| correct power =", round(pow_studentized_tau[idx_05], 3),
+    "| incorrect power =", round(pow_standard_tau[idx_05], 3), "\n")
+cat("tau^2 = 0.4:  power diff =", round(power_diff_tau[idx_04], 4),
+    "| correct power =", round(pow_studentized_tau[idx_04], 3),
+    "| incorrect power =", round(pow_standard_tau[idx_04], 3), "\n")
+cat("tau^2 = 0.3:  power diff =", round(power_diff_tau[idx_03], 4),
+    "| correct power =", round(pow_studentized_tau[idx_03], 3),
+    "| incorrect power =", round(pow_standard_tau[idx_03], 3), "\n")
+cat("Most negative distortion at tau^2 =", round(tau2_seq[idx_min], 3),
+    "| power diff =", round(power_diff_tau[idx_min], 4), "\n")
+
+# --- Scenario Table ---
+compute_scenario <- function(p_i, sigma_ratio, n_i, beta_i, E_r2_base){
+  sigma0   <- E_r2_base / (p_i * sigma_ratio + (1 - p_i))
+  sigma1   <- sigma_ratio * sigma0
+  E_W2_i   <- p_i * (1 - p_i)
+  E_r2_i   <- p_i * sigma1 + (1 - p_i) * sigma0
+  E_W2r2_i <- p_i * (1-p_i)^2 * sigma1 + (1-p_i) * p_i^2 * sigma0
+  tau2_i   <- E_W2r2_i / (E_W2_i * E_r2_i)
+  
+  pow_studentized <- 1 - pnorm(z_a - beta_i * p_i*(1-p_i) / sqrt(E_W2r2_i / n_i))
+  pow_standard    <- 1 - pnorm((z_a * sqrt(E_W2_i * E_r2_i) -
+                                  beta_i * p_i*(1-p_i)*sqrt(n_i)) / sqrt(E_W2r2_i))
+  mde_studentized <- (z_a + z_b) * sqrt(E_W2r2_i) / (p_i * (1-p_i) * sqrt(n_i))
+  mde_standard    <- (z_a * sqrt(E_W2_i * E_r2_i) + z_b * sqrt(E_W2r2_i)) /
+                       (p_i * (1-p_i) * sqrt(n_i))
+  n_studentized   <- (z_a + z_b)^2 * E_W2r2_i / (beta_i * p_i * (1-p_i))^2
+  n_standard      <- ((z_a * sqrt(E_W2_i * E_r2_i) + z_b * sqrt(E_W2r2_i)) /
+                        (beta_i * p_i * (1-p_i)))^2
+  
+  return(data.frame(
+    tau2     = round(tau2_i, 3),
+    pow_diff = round(pow_standard - pow_studentized, 3),
+    mde_diff = round(mde_standard - mde_studentized, 0),
+    n_diff   = round(n_standard - n_studentized, 0)
+  ))
+}
+
+scenario_params <- list(
+  list(p_label = "0.5", ratio_label = "1.0", p = 0.5, ratio = 1),
+  list(p_label = "0.5", ratio_label = "2.0", p = 0.5, ratio = 2),
+  list(p_label = "0.3", ratio_label = "1.0", p = 0.3, ratio = 1),
+  list(p_label = "0.3", ratio_label = "2.0", p = 0.3, ratio = 2),
+  list(p_label = "0.1", ratio_label = "1.0", p = 0.1, ratio = 1),
+  list(p_label = "0.1", ratio_label = "2.0", p = 0.1, ratio = 2),
+  list(p_label = "0.1", ratio_label = "0.5", p = 0.1, ratio = 0.5)
+)
+
+scenario_list <- lapply(scenario_params, function(s){
+  res <- compute_scenario(s$p, s$ratio, n, beta_long, E_r2)
+  data.frame(p = s$p_label, sigma_ratio = s$ratio_label,
+             tau2 = res$tau2, pow_diff = res$pow_diff,
+             mde_diff = res$mde_diff, n_diff = res$n_diff)
+})
+
+lalonde_row <- data.frame(
+  p           = "0.416",
+  sigma_ratio = "--",
+  tau2        = round(tau2, 3),
+  pow_diff    = round(pow_standard - pow_studentized, 3),
+  mde_diff    = round(mde_standard - mde_studentized, 0),
+  n_diff      = round(n_standard - n_studentized, 0)
+)
+
+scenarios_df <- bind_rows(scenario_list, lalonde_row)
+print(scenarios_df)
+
+# --- Print LaTeX table ---
+cat("\\begin{table}[H]\n")
+cat("\\centering\n")
+cat("\\caption{Distortion between unstudentized and studentized test across scenarios.\n")
+cat("$\\Delta$ Power, $\\Delta$ MDE, and $\\Delta n^*$ are defined as unstudentized minus studentized.\n")
+cat("Positive values indicate the unstudentized test overstates relative to the studentized test.\n")
+cat("All scenarios use $n = 445$, $\\hat{\\beta}_{\\text{long}} = 1606$, and $\\alpha = 0.05$.}\n")
+cat("\\label{tab:scenarios}\n")
+cat("\\begin{tabular}{cccccc}\n")
+cat("\\toprule\n")
+cat("$p$ & $\\sigma_1/\\sigma_0$ & $\\tau^2$ & $\\Delta$ Power & $\\Delta$ MDE & $\\Delta n^*$ \\\\\n")
+cat("\\midrule\n")
+for(i in 1:nrow(scenarios_df)){
+  if(i == 8) cat("\\midrule\n")
+  cat(paste0(scenarios_df$p[i], " & ", scenarios_df$sigma_ratio[i], " & ",
+             scenarios_df$tau2[i], " & ", scenarios_df$pow_diff[i], " & ",
+             scenarios_df$mde_diff[i], " & ", scenarios_df$n_diff[i], " \\\\\n"))
+}
+cat("\\bottomrule\n")
+cat("\\end{tabular}\n")
+cat("\\end{table}\n")
+
+```
+
