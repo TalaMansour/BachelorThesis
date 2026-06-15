@@ -175,7 +175,7 @@ d_true_l <- dnorm(x_seq_l, mean = 0, sd = sd_true_l)
 plot_df_l <- data.frame(
   x    = rep(x_seq_l, 2),
   y    = c(d_perm_l, d_true_l),
-  type = rep(c("Randomization distribution", "True sampling distribution"),
+  type = rep(c("Randomization distribution", "True asymptotic distribution (H0)"),
              each = length(x_seq_l))
 )
 
@@ -198,16 +198,16 @@ lalondeTau <- ggplot() +
            label = paste0("Type I error = ", round(rej_prob_l, 3)),
            color = "#3498DB", hjust = 0, size = 3.5) +
   scale_color_manual(values = c("Randomization distribution" = "orange",
-                                 "True sampling distribution" = "#3498DB"),
+                                 "True asymptotic distribution (H0)" = "#3498DB"),
                      name = NULL) +
-  labs(title = expression("Randomization vs Sampling Distribution, " ~
+  labs(title = expression("Randomization vs Asymptotic Distribution, " ~
                           tau^2 ~ "= 1.048"),
        x = expression(T[n]), y = "Density") +
   theme_minimal(base_size = 13) +
   theme(plot.title = element_text(hjust = 0.5),
         legend.position = "bottom",
         panel.grid.minor = element_blank())
-#ggsave("fig_ch4_lalonde", plot = lalondeTau, width = 8, height = 5)
+ggsave("fig_ch4_lalonde.pdf", plot = lalondeTau, width = 8, height = 5)
 lalondeTau
 ```
 ## scenarios
@@ -265,7 +265,7 @@ d_true_s1 <- dnorm(x_seq_s1, mean = 0, sd = sd_true)
 plot_df_s1 <- data.frame(
   x    = rep(x_seq_s1, 2),
   y    = c(d_perm_s1, d_true_s1),
-  type = rep(c("Randomization distribution", "True sampling distribution"),
+  type = rep(c("Randomization distribution", "True asymptotic distribution (H0)"),
              each = length(x_seq_s1))
 )
 
@@ -288,9 +288,9 @@ p_high <- ggplot() +
            label = paste0("Type I error = ", round(rej_prob, 3)),
            color = "#3498DB", hjust = 0, size = 3.5) +
   scale_color_manual(values = c("Randomization distribution" = "orange",
-                                 "True sampling distribution" = "#3498DB"),
+                                 "True asymptotic distribution (H0)" = "#3498DB"),
                      name = NULL) +
-  labs(title = expression("Randomization vs Sampling Distribution," ~
+  labs(title = expression("Randomization vs Asymptotic Distribution," ~
                           tau^2 ~ "= 1.84"),
        x = expression(T[n]), y = "Density") +
   theme_minimal(base_size = 12) +
@@ -298,7 +298,7 @@ p_high <- ggplot() +
         legend.position = "bottom",
         panel.grid.minor = element_blank())
 p_high
-##ggsave("fig_ch3_tau_high.pdf", plot = p_high, width = 8, height = 5)
+ggsave("fig_ch3_tau_high.pdf", plot = p_high, width = 8, height = 5)
 ```
 ## Scenarios
 ```{r}
@@ -353,7 +353,7 @@ d_true_s2 <- dnorm(x_seq_s2, mean = 0, sd = sd_true2)
 plot_df_s2 <- data.frame(
   x    = rep(x_seq_s2, 2),
   y    = c(d_perm_s2, d_true_s2),
-  type = rep(c("Randomization distribution", "True sampling distribution"),
+  type = rep(c("Randomization distribution", "True asymptotic distribution (H0)"),
              each = length(x_seq_s2))
 )
 
@@ -376,9 +376,9 @@ p_low <- ggplot() +
            label = paste0("Type I error = ", round(rej_prob2, 3)),
            color = "#3498DB", hjust = 0, size = 3.5) +
   scale_color_manual(values = c("Randomization distribution" = "orange",
-                                 "True sampling distribution" = "#3498DB"),
+                                 "True asymptotic distribution (H0)" = "#3498DB"),
                      name = NULL) +
-  labs(title = expression("Randomization vs Sampling Distribution," ~
+  labs(title = expression("Randomization vs Asymptotic Distribution," ~
                           tau^2 ~ "= 0.62"),
        x = expression(T[n]), y = "Density") +
   theme_minimal(base_size = 12) +
@@ -386,7 +386,7 @@ p_low <- ggplot() +
         legend.position = "bottom",
         panel.grid.minor = element_blank())
 p_low
-##ggsave("fig_ch3_tau_low.pdf", plot = p_low, width = 8, height = 5)
+ggsave("fig_ch3_tau_low.pdf", plot = p_low, width = 8, height = 5)
 ```
 ## Power distortion curve
 ```{r}
